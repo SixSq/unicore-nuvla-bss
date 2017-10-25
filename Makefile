@@ -1,5 +1,5 @@
 init:
-	pip install -r requirements.txt
+	pip install -r requirements.txt -r requirements-dev.txt
 
 test:
 	export PYTHONPATH=$(shell pwd)/lib; py.test -m local -s -vvv tests

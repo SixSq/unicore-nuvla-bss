@@ -4,10 +4,10 @@ Implementation of UNICORE TSI BSS for Nuvla service.
 
 ### Development environment
 
-Works with Python `>= 2.7`.
+Works with Python `>= 2.7`. To install requirements run
 
 ```
-pip install -r requirements.txt -r requirements-dev.txt
+make init
 ```
 
 ### Testing
