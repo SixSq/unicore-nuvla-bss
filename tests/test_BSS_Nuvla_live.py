@@ -13,7 +13,14 @@ nuvla_apisecret = ''
 cloud_key = ''
 cloud_secret = ''
 
+need_nuvla_creds = pytest.mark.skipif(not all([nuvla_apikey, nuvla_apisecret]),
+                                      reason="requires nuvla credentials")
+need_cloud_creds = pytest.mark.skipif(not all([cloud_key, cloud_secret]),
+                                      reason="requires cloud credentials")
 
+
+@need_nuvla_creds
+@need_cloud_creds
 def test_get_cloud_creds():
     nuvla = BSS.nuvla("#TSI_IDENTITY %s:%s\n" % (nuvla_apikey, nuvla_apisecret))
     bss = BSS()
@@ -22,6 +29,7 @@ def test_get_cloud_creds():
     assert cloud_secret == secret
 
 
+@need_nuvla_creds
 def test_stage_in_to_s3():
     path = tempfile.mkdtemp()
     files = set()
