@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -6,7 +7,6 @@ from BSS import BSS
 import pytest
 
 pytestmark = pytest.mark.local
-
 
 
 class TestBSSTorque(unittest.TestCase):
@@ -40,5 +40,4 @@ UC_USERDN=abc
             files_chk = set(BSS._get_stagein_files(msg))
             assert 0 == len(files ^ files_chk)
         finally:
-            import shutil
             shutil.rmtree(path)

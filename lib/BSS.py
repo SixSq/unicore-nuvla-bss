@@ -1,7 +1,9 @@
 """Nuvla connector for UNICORE """
 
+import hashlib
 import os
 import re
+import time
 import Utils
 
 from BSSCommon import BSSBase
@@ -9,6 +11,10 @@ from BSSCommon import BSSBase
 from slipstream.api.api import Api
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
+
+CLOUD = 'exoscale'
+CLOUD_CRED_NAME_PREF = 'hbp_mooc'
+BUCKET_NAME_PREF = CLOUD_CRED_NAME_PREF
 
 
 class BSS(BSSBase):
@@ -18,9 +24,7 @@ class BSS(BSSBase):
         key_secret = Utils.extract_parameter(message, "IDENTITY")
         if key_secret:
             nuvla = Api('https://nuv.la')
-            # FIXME
-            nuvla.login_internal(*key_secret.split(':'))
-            # nuvla.login_apikey(*key_secret.split(':'))
+            nuvla.login_apikey(*key_secret.split(':'))
             return nuvla
         else:
             raise Exception('No key/secret provided via IDENTITY.')
@@ -45,13 +49,15 @@ class BSS(BSSBase):
         return "nuvla"
 
     def _get_s3_creds(self, nuvla):
-        cloud = 'exoscale'
         creds = list(nuvla.get_cloud_credentials(
-            cimi_filter="type='cloud-cred-%s'" % cloud))
+            cimi_filter="type='cloud-cred-%s'" % CLOUD))
         if len(creds) < 1:
-            raise Exception('Failed to find cloud creds for %s.' % cloud)
-        cred = creds[0]
-        return cred.key, cred.secret
+            raise Exception('Failed to find cloud creds for %s.' % CLOUD)
+        for c in creds:
+            if c.name.startswith(CLOUD_CRED_NAME_PREF):
+                return c.key, c.secret
+        raise Exception('Failed to find %s cloud credentials with '
+                        'the name starting with %s.' % (CLOUD, CLOUD_CRED_NAME_PREF))
 
     def _get_s3_connection(self, nuvla):
         key, secret = self._get_s3_creds(nuvla)
@@ -61,19 +67,23 @@ class BSS(BSSBase):
             host='sos.exo.io')
 
     def _stage_in_to_s3(self, nuvla, message):
-        """Returns list of uploaded files on S3.
+        """Returns S3 Key of the directory where the files where staged in.
         :param nuvla: slipstream.api.api.Api
         :param message: TSI message
-        :return: list
+        :return: boto.s3.key.Key
         """
         s3 = self._get_s3_connection(nuvla)
-        bucket_name = 'mooc_hbp_course_%s' % 'konstan'
+        bucket_name = '%s_%s' % (
+            BUCKET_NAME_PREF,
+            hashlib.md5(nuvla.username.encode()).hexdigest())
         bucket = s3.create_bucket(bucket_name, policy='private')
+        bucket_stage_dir = str(int(time.time() * 1000))
         files = self._get_stagein_files(message)
         for f in files:
             fn = os.path.basename(f)
-            key = Key(bucket, 'run123/in/%s' % fn)
+            key = Key(bucket, '%s/%s' % (bucket_stage_dir, fn))
             key.set_contents_from_filename(f)
+        return Key(bucket, bucket_stage_dir)
 
     def submit(self, message, connector, config, LOG):
         try:
