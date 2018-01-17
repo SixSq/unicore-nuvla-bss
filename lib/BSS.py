@@ -31,7 +31,7 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
                  # '???': 'SUSPENDED',
                  }
 
-def nuvla_creds(self, message):
+def nuvla_creds(message):
     key_secret = re.search(r'^%s=.*$' % MSG_NUVLA_USER_CRED_KEY, message,)
     if key_secret:
         return key_secret.split(':')
