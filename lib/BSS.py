@@ -16,6 +16,7 @@ CLOUD_CONN_NAME = 'exoscale-ch-gva'
 CLOUD_CRED_NAME_PREF = 'hbp_mooc'
 BUCKET_NAME_PREF = CLOUD_CRED_NAME_PREF
 USERSPACE_RTP = 'userspace-endpoint'
+MSG_NUVLA_USER_CRED_KEY = 'UC_NUVLA_CRED'
 
 COMP_NAME = 'compute'
 
@@ -30,19 +31,25 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
                  # '???': 'SUSPENDED',
                  }
 
+def nuvla_creds(self, message):
+    key_secret = re.search(r'^%s=.*$' % MSG_NUVLA_USER_CRED_KEY, message,)
+    if key_secret:
+        return key_secret.split(':')
+
 
 class BSS(BSSBase):
     def _nuvla_creds(self, message):
-        key_secret = Utils.extract_parameter(message, "IDENTITY")
-        if key_secret:
-            return key_secret.split(':')
+        return nuvla_creds(message)
 
     @staticmethod
     def nuvla(message):
-        key_secret = Utils.extract_parameter(message, "IDENTITY")
+        key_secret = nuvla_creds(message)
         if key_secret:
-            nuvla = Api('https://nuv.la')
-            nuvla.login_apikey(*key_secret.split(':'))
+            k, s = key_secret.split(':')
+            m = hashlib.md5().update(k)
+            cf = '/tmp/' + m.hexdigest() + '.txt'
+            nuvla = Api('https://nuv.la', cookie_file=cf)
+            nuvla.login_apikey(k, s)
             return nuvla
         else:
             raise Exception('No key/secret provided via IDENTITY.')
