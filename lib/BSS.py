@@ -32,39 +32,38 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
                  # '???': 'SUSPENDED',
                  }
 
-def nuvla_creds(message):
-    key_secret = Utils.extract_parameter(message, "CREDENTIALS")
-    if key_secret is not None:
-	return key_secret
-    key_secret = re.search(r'^%s="(.*)";' % MSG_NUVLA_USER_CRED_KEY, message, re.M)
-    if key_secret:
-        return key_secret.group(1)
-
 
 class BSS(BSSBase):
-    def _nuvla_creds(self, message):
-        return nuvla_creds(message)
+    
+    def _extract_oidc_token(message):
+        """Extracts the value of UC_OAUTH_BEARER_TOKEN from the message.
+        """
+        result = re.search(r".*^#UC_OAUTH_BEARER_TOKEN=\"(.*)\";.*", message, re.M)
+        if result is None or result.group(1)=='':
+            return None
+        else:
+            return result.group(1)
 
     @staticmethod
     def nuvla(message):
-        key_secret = nuvla_creds(message)
-        if key_secret:
-            k, s = key_secret.split(':')
+        token = _extract_oidc_token(message)
+        if token:
             m = hashlib.md5()
-	    m.update(k)
+            m.update(token)
             cf = '/tmp/' + m.hexdigest() + '.txt'
             nuvla = Api('https://nuv.la', cookie_file=cf)
-            nuvla.login_apikey(k, s)
+            nuvla.login({"href": "session-template/mitreid-token-hbp",
+                         "token": token})
             return nuvla
         else:
-            raise Exception('No key/secret provided via IDENTITY.')
+            raise Exception('No token or invalid token provided in UC_OAUTH_BEARER_TOKEN.')
 
     @staticmethod
     def _get_app_uri(message):
         app = re.search(r'^UC_EXECUTABLE=\'(.*)\';', message, re.MULTILINE)
-	print(app)
+        print(app)
         if app:
-	    print(app.group(1))
+            print(app.group(1))
             return app.group(1)
         else:
             return None
@@ -132,10 +131,10 @@ class BSS(BSSBase):
                 continue
             fn = '%s/%s' % (local_path.rstrip('/'), os.path.basename(k.name))
             k.get_contents_to_filename(fn)
-	# create exit code file expected by UNICORE
-	exit_code = '%s/%s' % (local_path.rstrip('/'), "UNICORE_SCRIPT_EXIT_CODE")
+        # create exit code file expected by UNICORE
+        exit_code = '%s/%s' % (local_path.rstrip('/'), "UNICORE_SCRIPT_EXIT_CODE")
         with open(exit_code, "w") as f:
-	    f.write('0\n')
+            f.write('0\n')
 
     def _get_s3_scratch_dir(self, message, nuvla):
         """Returns bucket and scratch directory name.
@@ -161,9 +160,6 @@ class BSS(BSSBase):
         for k in bucket.list(dir_name):
             k.delete()
 
-    def _apicred_params(self, message):
-        return dict(zip(["api-key", "api-secret"], nuvla_creds(message).split(':')))
-
     def _get_scratch_path(self, nuvla, duid):
         param = '%s.1:%s' % (COMP_NAME, USERSPACE_RTP)
         return nuvla.get_deployment_parameter(duid, param, ignore_abort=True)
@@ -179,7 +175,7 @@ class BSS(BSSBase):
             connector.failed('No application URI provided.')
             return
         try:
-	    app = self._get_app_uri(message)
+            app = self._get_app_uri(message)
             if not app:
                 connector.failed('No application URI provided.')
                 return
@@ -187,8 +183,6 @@ class BSS(BSSBase):
             compute_params = {
                 USERSPACE_RTP: "%s/%s" % (s3_stage_path.bucket.name,
                                           s3_stage_path.name)}
-            # FIXME: this will be removed when API key authn is available on VM.
-            compute_params.update(self._apicred_params(message))
             params = {"compute": compute_params}
             dpl_id = nuvla.deploy(app, cloud={"compute": CLOUD_CONN_NAME},
                                   parameters=params, keep_running='never')
