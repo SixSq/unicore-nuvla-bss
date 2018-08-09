@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import time
+import sys
 import Utils
 
 from BSSCommon import BSSBase
@@ -13,7 +14,7 @@ from boto.s3.connection import S3Connection, Key, Bucket
 
 CLOUD = 'exoscale'
 CLOUD_CONN_NAME = 'exoscale-ch-gva'
-CLOUD_CRED_NAME_PREF = 'hbp_mooc'
+CLOUD_CRED_NAME_PREF = 'hbp-mooc'
 BUCKET_NAME_PREF = CLOUD_CRED_NAME_PREF
 USERSPACE_RTP = 'userspace-endpoint'
 MSG_NUVLA_USER_CRED_KEY = 'UC_NUVLA_CRED'
@@ -32,9 +33,12 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
                  }
 
 def nuvla_creds(message):
-    key_secret = re.search(r'^%s=.*$' % MSG_NUVLA_USER_CRED_KEY, message,)
+    key_secret = Utils.extract_parameter(message, "CREDENTIALS")
+    if key_secret is not None:
+	return key_secret
+    key_secret = re.search(r'^%s="(.*)";' % MSG_NUVLA_USER_CRED_KEY, message, re.M)
     if key_secret:
-        return key_secret.split(':')
+        return key_secret.group(1)
 
 
 class BSS(BSSBase):
@@ -46,7 +50,8 @@ class BSS(BSSBase):
         key_secret = nuvla_creds(message)
         if key_secret:
             k, s = key_secret.split(':')
-            m = hashlib.md5().update(k)
+            m = hashlib.md5()
+	    m.update(k)
             cf = '/tmp/' + m.hexdigest() + '.txt'
             nuvla = Api('https://nuv.la', cookie_file=cf)
             nuvla.login_apikey(k, s)
@@ -56,9 +61,11 @@ class BSS(BSSBase):
 
     @staticmethod
     def _get_app_uri(message):
-        app = re.search(r'^UC_EXECUTABLE=.*$', message, re.MULTILINE)
+        app = re.search(r'^UC_EXECUTABLE=\'(.*)\';', message, re.MULTILINE)
+	print(app)
         if app:
-            return app.group(0).split('=')[1]
+	    print(app.group(1))
+            return app.group(1)
         else:
             return None
 
@@ -66,7 +73,7 @@ class BSS(BSSBase):
     def _get_stagein_files(message):
         """Only files. Directories are skipped.
         """
-        path = Utils.extract_parameter(message, "USPACE")
+        path = Utils.extract_parameter(message, "USPACE_DIR")
         return [os.path.join(path, f) for f in os.listdir(path)
                 if os.path.isfile(os.path.join(path, f))]
 
@@ -74,13 +81,13 @@ class BSS(BSSBase):
         return "nuvla"
 
     def _get_s3_creds(self, nuvla):
-        cfilter = "type='cloud-cred-%s' and name^='%s'" % (CLOUD,
-                                                           CLOUD_CRED_NAME_PREF)
+        cfilter = "type='cloud-cred-%s' and connector/href^='connector/%s'" % (CLOUD,
+                                                           CLOUD_CONN_NAME)
         creds = list(nuvla.get_cloud_credentials(cimi_filter=cfilter))
         if len(creds) < 1:
             raise Exception('Failed to find %s cloud credentials with '
                             'the name starting with %s.' % (
-                                CLOUD, CLOUD_CRED_NAME_PREF))
+                                CLOUD, CLOUD_CONN_NAME))
         c = creds[0]
         return c.key, c.secret
 
@@ -89,7 +96,7 @@ class BSS(BSSBase):
         return S3Connection(
             aws_access_key_id=key,
             aws_secret_access_key=secret,
-            host='sos.exo.io')
+            host='sos-ch-dk-2.exo.io')
 
     def _put_files_to_s3(self, nuvla, message):
         """Returns S3 Key of the directory where the files were staged in.
@@ -98,7 +105,7 @@ class BSS(BSSBase):
         :return: boto.s3.key.Key - directory where files were staged.
         """
         s3 = self._get_s3_connection(nuvla)
-        bucket_name = '%s_%s' % (
+        bucket_name = '%s-%s' % (
             BUCKET_NAME_PREF,
             hashlib.md5(nuvla.username.encode()).hexdigest())
         bucket = s3.create_bucket(bucket_name, policy='private')
@@ -117,7 +124,7 @@ class BSS(BSSBase):
 
     def _download_files_from_s3(self, message, nuvla):
         bucket, dir_name = self._get_s3_scratch_dir(message, nuvla)
-        local_path = Utils.extract_parameter(message, "USPACE")
+        local_path = Utils.extract_parameter(message, "USPACE_DIR")
         if not local_path:
             raise Exception('Failed to get local path to files as USPACE.')
         for k in bucket.list(prefix=('%s/output/' % dir_name)):
@@ -125,6 +132,10 @@ class BSS(BSSBase):
                 continue
             fn = '%s/%s' % (local_path.rstrip('/'), os.path.basename(k.name))
             k.get_contents_to_filename(fn)
+	# create exit code file expected by UNICORE
+	exit_code = '%s/%s' % (local_path.rstrip('/'), "UNICORE_SCRIPT_EXIT_CODE")
+        with open(exit_code, "w") as f:
+	    f.write('0\n')
 
     def _get_s3_scratch_dir(self, message, nuvla):
         """Returns bucket and scratch directory name.
@@ -151,7 +162,7 @@ class BSS(BSSBase):
             k.delete()
 
     def _apicred_params(self, message):
-        return dict(zip(["api-key", "api-secret"], self._nuvla_creds(message)))
+        return dict(zip(["api-key", "api-secret"], nuvla_creds(message).split(':')))
 
     def _get_scratch_path(self, nuvla, duid):
         param = '%s.1:%s' % (COMP_NAME, USERSPACE_RTP)
@@ -168,6 +179,10 @@ class BSS(BSSBase):
             connector.failed('No application URI provided.')
             return
         try:
+	    app = self._get_app_uri(message)
+            if not app:
+                connector.failed('No application URI provided.')
+                return
             s3_stage_path = self._put_files_to_s3(nuvla, message)
             compute_params = {
                 USERSPACE_RTP: "%s/%s" % (s3_stage_path.bucket.name,
@@ -177,10 +192,12 @@ class BSS(BSSBase):
             params = {"compute": compute_params}
             dpl_id = nuvla.deploy(app, cloud={"compute": CLOUD_CONN_NAME},
                                   parameters=params, keep_running='never')
-            connector.ok(str(dpl_id))
+            LOG.info("Submitted to Nuvla with id %s" % str(dpl_id))
+            connector.write_message(str(dpl_id))
             return
-        except Exception as ex:
-            connector.failed(str(ex))
+        except:
+            LOG.exception("Error submitting to NUVLA")
+            connector.failed(str(sys.exc_info()[1]))
 
     def get_status_listing(self, message, connector, config, LOG):
         result = ['QSTAT']
