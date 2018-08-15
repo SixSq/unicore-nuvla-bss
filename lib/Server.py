@@ -14,6 +14,7 @@ import signal
 import socket
 import sys
 import time
+import Utils
 from SSL import setup_ssl, verify_peer
 
 
@@ -24,6 +25,7 @@ def configure_socket(sock, LOG):
     after_idle = 5
     interval = 1
     max_fails = 3
+    sock.settimeout(None)
     if not sys.platform.startswith("win"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     if sys.platform.startswith("darwin"):
@@ -104,6 +106,7 @@ def connect(configuration, LOG):
             except EnvironmentError as e:
                 LOG.info("Error verifying connection from %s : %s" % (
                     xnjs_host, str(e)))
+                close_quietly(xnjs)
                 continue
 
         try:
@@ -133,15 +136,17 @@ def connect(configuration, LOG):
             # write to the XNJS to tell it everything is OK
             xnjs.sendall(b'OK\n')
             # callback to the XNJS
-            xnjs_port = get_xnjs_port(configuration, msg, LOG)
+            xnjs_port = get_xnjs_port(configuration, Utils.decode(msg), LOG)
+            if xnjs_port is None:
+                raise EnvironmentError("Received invalid message")
             address = (xnjs_host, xnjs_port)
             LOG.info("Contacting XNJS on %s port %s" % address)
             # allow some time for XNJS to start listening
             time.sleep(1)
-            command = socket.create_connection(address)
-            data = socket.create_connection(address)
+            command = socket.create_connection(address, 10)
+            data = socket.create_connection(address, 10)
         except EnvironmentError as e:
-            LOG.info("Error on callback to XNJS : %s" % str(e))
+            LOG.info("Error communicating with XNJS : %s" % str(e))
             close_quietly(xnjs)
             continue
 
@@ -191,5 +196,8 @@ def get_xnjs_port(configuration, message, LOG):
     port = configuration.get('tsi.njs_port', None)
     if port is None:
         # read it from the message
-        port = re.match(r"\w+ (\w+)", message).group(1)
+        try:
+            port = re.match(r"\w+ (\w+)", message).group(1)
+        except:
+            pass
     return port

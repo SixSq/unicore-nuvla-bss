@@ -16,7 +16,7 @@ import ACL, BecomeUser, BSS, Connector, Local, Reservation, Server, SSL, IO, Uti
 #
 # the TSI version
 #
-MY_VERSION = "7.8.0"
+MY_VERSION = "7.9.0"
 
 # supported Python versions
 REQUIRED_VERSION = (2, 7, 6)
@@ -28,10 +28,11 @@ def assert_version():
     Checks that the Python version is correct.
     Returns True if version is 2.7.6 or later
     """
+    ver = sys.version_info
     if Utils.have_p3:
-        return sys.version_info >= REQUIRED_VERSION_3
+        return ver >= REQUIRED_VERSION_3
     else:
-        return sys.version_info >= REQUIRED_VERSION
+        return ver >= REQUIRED_VERSION
 
 
 def get_startup_logger():
@@ -325,7 +326,7 @@ def main(argv=None):
     Start the TSI. Read config, init XNJS connection
     and start processing
     """
-    if not assert_version:
+    if not assert_version():
         raise RuntimeError("Unsupported version of Python! "
                            "Must be %s or later." % str(REQUIRED_VERSION))
     LOG = get_startup_logger()
