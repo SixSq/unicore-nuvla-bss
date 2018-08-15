@@ -34,19 +34,11 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
 
 
 class BSS(BSSBase):
-    
-    def _extract_oidc_token(message):
-        """Extracts the value of UC_OAUTH_BEARER_TOKEN from the message.
-        """
-        result = re.search(r".*^#UC_OAUTH_BEARER_TOKEN=\"(.*)\";.*", message, re.M)
-        if result is None or result.group(1)=='':
-            return None
-        else:
-            return result.group(1)
 
     @staticmethod
     def nuvla(message):
-        token = _extract_oidc_token(message)
+        token = Utils.extract_parameter(message, "CREDENTIALS")
+
         if token:
             m = hashlib.md5()
             m.update(token)
@@ -56,7 +48,7 @@ class BSS(BSSBase):
                          "token": token})
             return nuvla
         else:
-            raise Exception('No token or invalid token provided in UC_OAUTH_BEARER_TOKEN.')
+            raise Exception('No token or invalid token provided in TSI_CREDENTIALS.\n')
 
     @staticmethod
     def _get_app_uri(message):
@@ -167,18 +159,16 @@ class BSS(BSSBase):
     def submit(self, message, connector, config, LOG):
         try:
             nuvla = self.nuvla(message)
+            LOG.info('successfully authenticated with Nuvla')
         except Exception as ex:
             connector.failed('Failed to authenticate to Nuvla: %s' % str(ex))
-            return
-        app = self._get_app_uri(message)
-        if not app:
-            connector.failed('No application URI provided.')
             return
         try:
             app = self._get_app_uri(message)
             if not app:
                 connector.failed('No application URI provided.')
                 return
+            LOG.info('found application URI: %s' % app)
             s3_stage_path = self._put_files_to_s3(nuvla, message)
             compute_params = {
                 USERSPACE_RTP: "%s/%s" % (s3_stage_path.bucket.name,
@@ -187,6 +177,7 @@ class BSS(BSSBase):
             dpl_id = nuvla.deploy(app, cloud={"compute": CLOUD_CONN_NAME},
                                   parameters=params, keep_running='never')
             LOG.info("Submitted to Nuvla with id %s" % str(dpl_id))
+            #connector.ok()
             connector.write_message(str(dpl_id))
             return
         except:
@@ -199,6 +190,8 @@ class BSS(BSSBase):
         for dpl in nuvla.list_deployments(cloud=CLOUD_CONN_NAME):
             result.append('%s %s' % (dpl.id,
                                      self.convert_status(dpl.status)))
+        message = '\n'.join(result) + '\n'
+        LOG.info(message)
         connector.write_message('\n'.join(result) + '\n')
 
     def get_job_details(self, message, connector, config, LOG):
@@ -210,6 +203,7 @@ class BSS(BSSBase):
         state = self.convert_status(
             nuvla.get_deployment_parameter(duid, 'ss:state',
                                            ignore_abort=True))
+        LOG.info("state: %s, %s" % (duid, state))
         if state == 'COMPLETED':
             self._download_files_from_s3(message, nuvla)
             self._delete_s3_scratch_space(message, nuvla)

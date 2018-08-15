@@ -31,7 +31,7 @@ class BSSBase(object):
 
     defaults = {
         'tsi.qstat_cmd': 'ps -e -os,args',
-        'tsi.abort_cmd': 'kill -9',
+        'tsi.abort_cmd': 'SID=$(ps -e -osid,args | grep "nice .* ./UNICORE_Job_%s" | grep -v "grep " | egrep -o "^\s*([0-9]+)" ); pkill -SIGTERM -s $SID',
     }
 
     def init(self, config, LOG):
@@ -166,7 +166,7 @@ class BSSBase(object):
 
     def abort_job(self, message, connector, config, LOG):
         bssid = Utils.extract_parameter(message, "BSSID")
-        cmd = config["tsi.abort_cmd"] + " " + bssid
+        cmd = config["tsi.abort_cmd"] % bssid
         Utils.run_and_report(cmd, connector)
 
     def hold_job(self, message, connector, config, LOG):

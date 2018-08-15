@@ -1,0 +1,7 @@
+LAST_PID
+logs
+*.pyc
+*.bck
+*.tar.gz
+
+

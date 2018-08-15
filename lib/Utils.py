@@ -29,6 +29,11 @@ def encode_3(message):
         message = unicode(message, "utf-8")
     return message
 
+def decode(message):
+    if have_p3:
+        return message.decode("utf-8")
+    else:
+        return message
 
 def extract_parameter(message, parameter, default_value=None):
     """
