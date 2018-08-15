@@ -36,14 +36,9 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
 class BSS(BSSBase):
 
     @staticmethod
-    def _extract_oidc_token(message):
-        """Extracts the value of UC_OAUTH_BEARER_TOKEN from the message.
-        """
-        return Utils.extract_parameter(message, "CREDENTIALS")
-
-    @staticmethod
     def nuvla(message):
-        token = BSS._extract_oidc_token(message)
+        token = Utils.extract_parameter(message, "CREDENTIALS")
+
         if token:
             m = hashlib.md5()
             m.update(token)
@@ -53,7 +48,7 @@ class BSS(BSSBase):
                          "token": token})
             return nuvla
         else:
-            raise Exception('No token or invalid token provided in UC_OAUTH_BEARER_TOKEN.\n')
+            raise Exception('No token or invalid token provided in TSI_CREDENTIALS.\n')
 
     @staticmethod
     def _get_app_uri(message):
