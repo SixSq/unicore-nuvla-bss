@@ -35,6 +35,23 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
 
 class BSS(BSSBase):
 
+    def _nuvla_parameter(self, line):
+        """
+        Extracts a value that is given in the form 'NUVLA__<parameter name>="<value>"'
+        from the line. Returns a dict with the parameter set or an empty dict.
+        """
+        result = re.search(r'^NUVLA__(.*)="(.*)";.*$', line)
+        if result is None or result.group(1)=='' or result.group(2)=='':
+            return {}
+        else:
+            return {result.group(1): result.group(2)}
+
+    def _nuvla_parameter_dict(self, message):
+        result = {}
+        for line in message.splitlines():
+            result.update(self._nuvla_parameter(line))
+        return result
+        
     @staticmethod
     def nuvla(message):
         token = Utils.extract_parameter(message, "CREDENTIALS")
@@ -173,7 +190,11 @@ class BSS(BSSBase):
             compute_params = {
                 USERSPACE_RTP: "%s/%s" % (s3_stage_path.bucket.name,
                                           s3_stage_path.name)}
+
+            compute_params.update(self._nuvla_parameter_dict(message))
+
             params = {"compute": compute_params}
+            LOG.info("parameters: %s" % str(compute_params))
             dpl_id = nuvla.deploy(app, cloud={"compute": CLOUD_CONN_NAME},
                                   parameters=params, keep_running='never')
             LOG.info("Submitted to Nuvla with id %s" % str(dpl_id))
