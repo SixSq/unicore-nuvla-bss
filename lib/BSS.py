@@ -35,21 +35,39 @@ JOB_STATE_MAP = {'initializing': 'QUEUED',
 
 class BSS(BSSBase):
 
-    def _nuvla_parameter(self, line):
-        """
-        Extracts a value that is given in the form 'NUVLA__<parameter name>="<value>"'
-        from the line. Returns a dict with the parameter set or an empty dict.
-        """
-        result = re.search(r'^NUVLA__(.*)="(.*)";.*$', line)
-        if result is None or result.group(1)=='' or result.group(2)=='':
-            return {}
-        else:
-            return {result.group(1): result.group(2)}
+    @staticmethod
+    def check_params(messages):
+        params = BSS._nuvla_parameter_dict(messages)
+        return params
 
-    def _nuvla_parameter_dict(self, message):
+    @staticmethod
+    def _nested_set(dic, keys, value):
+        for key in keys[:-1]:
+            dic = dic.setdefault(key, {})
+        dic[keys[-1]] = value
+
+    @staticmethod
+    def _nuvla_parameter(options, line):
+        """
+        Extracts a value that is given in the form 'NUVLA__<node>__<parameter name>="<value>"'
+        from the line. If the '__<node>' part is not provided the node value defaults to
+        'compute'.  Updates the options with the parameter set.
+        """
+        result = re.search(r'^NUVLA__(.+)__(.+)="(.+)";.*$', line)
+        if result is not None:
+            BSS._nested_set(options, [result.group(1), result.group(2)], result.group(3))
+        else:
+            result = re.search(r'^NUVLA__(.+)="(.+)";.*$', line)
+            if result is not None:
+                BSS._nested_set(options, [COMP_NAME, result.group(1)], result.group(2))
+            
+        return options
+
+    @staticmethod
+    def _nuvla_parameter_dict(message):
         result = {}
         for line in message.splitlines():
-            result.update(self._nuvla_parameter(line))
+            BSS._nuvla_parameter(result, line)
         return result
         
     @staticmethod
@@ -186,16 +204,21 @@ class BSS(BSSBase):
                 connector.failed('No application URI provided.')
                 return
             LOG.info('found application URI: %s' % app)
+
+            params = BSS._nuvla_parameter_dict(message)
+
             s3_stage_path = self._put_files_to_s3(nuvla, message)
-            compute_params = {
-                USERSPACE_RTP: "%s/%s" % (s3_stage_path.bucket.name,
-                                          s3_stage_path.name)}
+            s3_stage_path_str =  "%s/%s" % (s3_stage_path.bucket.name,
+                                            s3_stage_path.name)
+            nested_set(params, [COMP_NAME, USERSPACE_RTP], s3_stage_path_str)
+            
+            LOG.info("parameters: %s" % str(params))
 
-            compute_params.update(self._nuvla_parameter_dict(message))
-
-            params = {"compute": compute_params}
-            LOG.info("parameters: %s" % str(compute_params))
-            dpl_id = nuvla.deploy(app, cloud={"compute": CLOUD_CONN_NAME},
+            # use default cloud for all nodes, old value was:
+            # {COMP_NAME: CLOUD_CONN_NAME}
+            cloud_params = {}
+            
+            dpl_id = nuvla.deploy(app, cloud=cloud_params,
                                   parameters=params, keep_running='never')
             LOG.info("Submitted to Nuvla with id %s" % str(dpl_id))
             #connector.ok()
