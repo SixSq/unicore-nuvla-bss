@@ -210,7 +210,7 @@ class BSS(BSSBase):
             s3_stage_path = self._put_files_to_s3(nuvla, message)
             s3_stage_path_str =  "%s/%s" % (s3_stage_path.bucket.name,
                                             s3_stage_path.name)
-            nested_set(params, [COMP_NAME, USERSPACE_RTP], s3_stage_path_str)
+            BSS._nested_set(params, [COMP_NAME, USERSPACE_RTP], s3_stage_path_str)
             
             LOG.info("parameters: %s" % str(params))
 
